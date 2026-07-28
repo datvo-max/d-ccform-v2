@@ -39,7 +39,7 @@ export function CompareDialog({
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="text-destructive flex items-center gap-2">
-            ⚠️ Công dân đã tồn tại trong hệ thống!
+            ⚠️ Cảnh báo trùng dữ liệu!
           </DialogTitle>
           <DialogDescription>
             Phát hiện số định danh cá nhân <strong>{existingRecord.idNumber}</strong> đã được lưu trữ trước đó.
@@ -94,17 +94,17 @@ export function CompareDialog({
 
         <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:space-x-0">
           <Button variant="outline" onClick={onSkip} className="sm:mr-auto">
-            Bỏ qua
+            Quay lại
           </Button>
 
           <Button variant="secondary" onClick={onAddFileOnly}>
-            Chỉ thêm file (Giữ data cũ)
+            Chỉ thêm file
           </Button>
           <Button onClick={onMerge}>
-            Cập nhật thông tin mới
+            Thêm file và cập nhật các trường
           </Button>
           {!hideCreateNew && (
-            <Button variant="outline" className="text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700" onClick={onCreateNew}>
+            <Button variant="outline" className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700" onClick={onCreateNew}>
               Tạo mới (không trùng)
             </Button>
           )}

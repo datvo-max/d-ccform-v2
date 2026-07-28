@@ -3,43 +3,199 @@
 
 'use client';
 
-import { createWorker, type Worker } from 'tesseract.js';
+import { createWorker, createScheduler, type Scheduler } from 'tesseract.js';
 import type { CitizenRecord, FamilyMember } from '@/types/citizen';
 import { removeVietnameseTones } from '@/lib/utils/removeVietnameseTones';
+import { removeTableLines } from '@/lib/utils/imageProcessor';
 
-let workerPromise: Promise<Worker> | null = null;
+let schedulerPromise: Promise<Scheduler> | null = null;
+let digitWorkerPromise: Promise<Tesseract.Worker> | null = null;
 
-// Khởi tạo Tesseract Worker một lần duy nhất
-async function getOcrWorker(): Promise<Worker> {
-  if (!workerPromise) {
-    workerPromise = (async () => {
-      const worker = await createWorker('vie+eng', 1, {
-        logger: () => {}, // Tắt log spam
+async function getDigitWorker() {
+  if (!digitWorkerPromise) {
+    digitWorkerPromise = (async () => {
+      const worker = await createWorker('eng', 1, { logger: () => {} });
+      await worker.setParameters({
+        tessedit_char_whitelist: '0123456789',
+        tessedit_pageseg_mode: '7',
       });
       return worker;
     })();
   }
-  return workerPromise;
+  return digitWorkerPromise;
 }
 
-// Chạy OCR trên ảnh (dạng Blob, File, hoặc DataURL)
+// Khởi tạo Tesseract Scheduler với nhiều worker để chạy song song thực sự
+async function getOcrScheduler(): Promise<Scheduler> {
+  if (!schedulerPromise) {
+    schedulerPromise = (async () => {
+      const scheduler = createScheduler();
+      // Sử dụng tối đa 4 workers hoặc bằng số luồng CPU hiện có (tùy điều kiện nào nhỏ hơn)
+      const numWorkers = typeof navigator !== 'undefined' && navigator.hardwareConcurrency 
+        ? Math.max(1, Math.min(navigator.hardwareConcurrency, 4))
+        : 4;
+      
+      const workerPromises = Array.from({ length: numWorkers }).map(async () => {
+        const worker = await createWorker('vie+eng', 1, {
+          logger: () => {}, // Tắt log spam
+        });
+        scheduler.addWorker(worker);
+      });
+      
+      await Promise.all(workerPromises);
+      return scheduler;
+    })();
+  }
+  return schedulerPromise;
+}
+
 export async function performOfflineOcr(imageSource: Blob | File | string): Promise<{
   text: string;
   confidence: number;
   parsedData: Partial<CitizenRecord>;
 }> {
   try {
-    const worker = await getOcrWorker();
-    const ret = await worker.recognize(imageSource);
+    // Chạy OCR cho toàn bộ form (không dùng removeTableLines trên ảnh gốc để bảo toàn nét chữ mỏng)
+    const scheduler = await getOcrScheduler();
+    const ret = await scheduler.addJob('recognize', imageSource);
     const rawText = ret.data.text || '';
     const confidence = Math.round(ret.data.confidence || 0);
 
     const parsedData = parseCc01Text(rawText);
+    
+    // Bước 3: Cắt ảnh và OCR chuyên sâu cho Số định danh
+    try {
+      const img = new Image();
+      const url = typeof imageSource === 'string' ? imageSource : URL.createObjectURL(imageSource);
+      await new Promise((resolve) => { img.onload = resolve; img.src = url; });
+      const imageWidth = img.width;
+      const imageHeight = img.height;
+      
+      const preciseId = await extractIdNumberWithCropping(imageSource, ret, imageWidth, imageHeight);
+      if (preciseId && preciseId.length === 12) {
+        parsedData.idNumber = preciseId;
+      }
+      
+      if (typeof imageSource !== 'string') URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Lỗi khi OCR cắt ảnh phụ:', err);
+    }
+
     return { text: rawText, confidence, parsedData };
   } catch (err) {
     console.error('Lỗi nhận diện OCR Offline Tesseract:', err);
     throw new Error('Không thể nhận diện văn bản bằng OCR Offline.');
   }
+}
+
+// Cắt vùng chứa 12 ô vuông của số định danh, xoá viền bằng hình học và OCR
+async function extractIdNumberWithCropping(
+  imageSource: Blob | File | string,
+  ret: any,
+  imageWidth: number,
+  imageHeight: number
+): Promise<string | undefined> {
+  const normLines = ret.data.lines.map((l: any) => removeVietnameseTones(l.text).toLowerCase());
+  const idLineIdx = normLines.findIndex((txt: string) => /dinh danh|so dinh danh|5\./.test(txt));
+  
+  if (idLineIdx === -1) return undefined;
+  
+  const idLine = ret.data.lines[idLineIdx];
+  // Toạ độ bắt đầu sau chữ "Số định danh cá nhân:"
+  const startX = idLine.bbox.x1 + 5; 
+  const endX = imageWidth - (imageWidth * 0.05); // Chừa lề phải 5%
+  const gridWidth = endX - startX;
+  if (gridWidth < 100) return undefined;
+
+  const startY = Math.max(0, idLine.bbox.y0 - 15);
+  const endY = Math.min(imageHeight, idLine.bbox.y1 + 15);
+  const gridHeight = endY - startY;
+
+  // Chiều rộng mỗi ô vuông
+  const boxWidth = gridWidth / 12;
+
+  // Lấy 70% ở giữa mỗi ô (bỏ 15% viền các bên để không dính nét kẻ bảng)
+  const cropMarginX = boxWidth * 0.15;
+  const cropMarginY = gridHeight * 0.15;
+  const sWidth = boxWidth - cropMarginX * 2;
+  const sHeight = gridHeight - cropMarginY * 2;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return undefined;
+
+  // Canvas mới sẽ chứa 12 chữ số xếp hàng ngang, cách nhau 5px
+  const spacing = 10;
+  canvas.width = 12 * (sWidth + spacing);
+  canvas.height = sHeight + 20;
+
+  // Tô nền trắng
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const img = new Image();
+  const url = typeof imageSource === 'string' ? imageSource : URL.createObjectURL(imageSource);
+  await new Promise((resolve) => { img.onload = resolve; img.src = url; });
+
+  // Vẽ phần tâm của 12 ô vào canvas mới
+  for (let i = 0; i < 12; i++) {
+    const sx = startX + i * boxWidth + cropMarginX;
+    const sy = startY + cropMarginY;
+    const dx = i * (sWidth + spacing);
+    const dy = 10;
+    
+    ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, sWidth, sHeight);
+  }
+
+  const cleanBlob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((b) => b ? resolve(b) : reject(), 'image/png');
+  });
+
+  const worker = await getDigitWorker();
+  const { data } = await worker.recognize(cleanBlob);
+  
+  const text = data.text.replace(/[^0-9]/g, '');
+  if (typeof imageSource !== 'string') URL.revokeObjectURL(url);
+
+  return text.length >= 12 ? text.substring(0, 12) : undefined;
+}
+
+export async function extractIdFromManualCrop(
+  imageSource: Blob | File | string,
+  cropRect: { x: number; y: number; width: number; height: number }
+): Promise<string | undefined> {
+  const { x: startX, y: startY, width: gridWidth, height: gridHeight } = cropRect;
+  
+  if (gridWidth < 50 || gridHeight < 10) return undefined;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return undefined;
+
+  canvas.width = gridWidth;
+  canvas.height = gridHeight;
+
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const img = new Image();
+  const url = typeof imageSource === 'string' ? imageSource : URL.createObjectURL(imageSource);
+  await new Promise((resolve) => { img.onload = resolve; img.src = url; });
+
+  // Vẽ nguyên phần người dùng đã khoanh (không chia 12 ô vì người dùng vẽ không đều)
+  ctx.drawImage(img, startX, startY, gridWidth, gridHeight, 0, 0, gridWidth, gridHeight);
+
+  const cleanBlob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((b) => b ? resolve(b) : reject(), 'image/png');
+  });
+
+  const worker = await getDigitWorker();
+  const { data } = await worker.recognize(cleanBlob);
+  
+  const text = data.text.replace(/[^0-9]/g, '');
+  if (typeof imageSource !== 'string') URL.revokeObjectURL(url);
+
+  return text;
 }
 
 // Tiền xử lý text: loại bỏ ký tự nhiễu từ viền bảng biểu của form (|, Ì, J, +, v.v.)
@@ -342,29 +498,63 @@ function parseCc01Text(rawText: string): Partial<CitizenRecord> {
   // ─── Số định danh cá nhân idNumber (12 số) ────────────────────────────────────
   {
     // Do số định danh nằm trong bảng 12 ô, OCR hay nhận nhầm viền ô thành l, I, |, !, Ì...
-    // Cách tốt nhất là tìm từ khóa, lấy một đoạn văn bản sau đó, gọt bỏ mọi thứ không phải số.
+    // Nhận nhầm số thành chữ: O/o/Q -> 0, S/s -> 5, B/b -> 8, Z/z -> 2
     const matchStart = normText.match(/dinh danh ca nhan|so dinh danh|dinh danh|5\./i);
-    if (matchStart) {
-      // Lấy 100 ký tự sau từ khóa
-      const substr = normText.substring(matchStart.index || 0, (matchStart.index || 0) + 150);
-      // Giữ lại số và chữ O/o (do hay nhầm 0 thành O)
-      const digitsOnly = substr.replace(/[^0-9Oo]/g, '').replace(/[Oo]/g, '0');
-      // ID luôn bắt đầu bằng 0 và có đúng 12 số
-      const match12 = digitsOnly.match(/(0\d{11})/);
-      if (match12) {
-        result.idNumber = match12[1];
+    
+    const extractId = (rawSubstr: string): string | null => {
+      // Cắt bỏ phần nhãn "Số định danh cá nhân:" nếu có
+      let content = rawSubstr;
+      const colonIdx = content.indexOf(':');
+      if (colonIdx !== -1) {
+        content = content.substring(colonIdx + 1);
+      } else {
+        // Cố gắng tìm chữ "danh" hoặc "nhan" rồi cắt
+        const danhMatch = content.match(/danh|nhan|nhân/i);
+        if (danhMatch && danhMatch.index) {
+          content = content.substring(danhMatch.index + danhMatch[0].length);
+        }
       }
+
+      // 1. Xóa TẤT CẢ các ký tự không phải chữ/số (để loại bỏ viền bảng: [ ] | ! : . , { } - _ \ /)
+      let cleaned = content.replace(/[^a-zA-Z0-9]/g, '');
+
+      // 2. Map TẤT CẢ các chữ cái có thể bị nhận nhầm từ số
+      const mapped = cleaned
+        .replace(/[OoQqCcDd]/g, '0')
+        .replace(/[lIi]/g, '1')
+        .replace(/[Zz]/g, '2')
+        .replace(/[Jj]/g, '3')
+        .replace(/[Aa]/g, '4')
+        .replace(/[Ss]/g, '5')
+        .replace(/[EeGg]/g, '6')
+        .replace(/[Tt\?]/g, '7')
+        .replace(/[Bb]/g, '8')
+        .replace(/[Pp]/g, '9');
+
+      // 3. Xóa những chữ cái không thể map (để lại số)
+      const digitsOnly = mapped.replace(/[^0-9]/g, '');
+
+      // 4. Tìm chuỗi 12 số
+      // Ưu tiên chuỗi bắt đầu bằng 0 (CCCD thật)
+      const normalMatch = digitsOnly.match(/(0\d{11})/);
+      if (normalMatch) return normalMatch[1];
+
+      // Nếu không có, chấp nhận chuỗi 12 số bất kỳ (thường là dữ liệu test giả)
+      const any12Match = digitsOnly.match(/(\d{12})/);
+      if (any12Match) return any12Match[1];
+
+      return null;
+    };
+
+    if (matchStart) {
+      // Lấy đoạn văn bản GỐC (text) chứa khoảng trắng và viền để độ chính xác cao hơn
+      const substr = text.substring(matchStart.index || 0, (matchStart.index || 0) + 200);
+      result.idNumber = extractId(substr) || undefined;
     }
 
-    // Fallback nếu không tìm thấy dựa trên từ khóa (quét toàn bộ văn bản)
+    // Fallback toàn bộ văn bản
     if (!result.idNumber) {
-      // Dùng text gốc (có dấu) để phòng hờ
-      const digitsOnly = text.replace(/[^0-9Oo]/g, '').replace(/[Oo]/g, '0');
-      const allMatches = [...digitsOnly.matchAll(/(0\d{11})/g)];
-      // Nếu có nhiều số 12 chữ số, ưu tiên số đầu tiên tìm được
-      if (allMatches.length > 0) {
-        result.idNumber = allMatches[0][1];
-      }
+      result.idNumber = extractId(text) || undefined;
     }
   }
 

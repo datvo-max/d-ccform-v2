@@ -13,6 +13,16 @@ export interface AttachedFile {
   createdAt: string;       // ISO timestamp
 }
 
+// Bảng tạm chứa thẻ PDF đã tách nhưng chưa OCR
+export interface TempCitizenRecord {
+  id?: number;
+  fileName: string;
+  fileType: 'image' | 'pdf';
+  pageNumber?: number;
+  imageBlob: Blob;
+  createdAt: string;
+}
+
 // Thông tin nhân thân (mục 20) — giữ cấu trúc, tạm bỏ OCR
 export interface FamilyMember {
   fullName: string;
