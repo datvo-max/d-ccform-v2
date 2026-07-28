@@ -3,7 +3,7 @@
 
 'use client';
 
-import { createWorker, createScheduler, type Scheduler } from 'tesseract.js';
+import { createWorker, createScheduler, type Scheduler, PSM } from 'tesseract.js';
 import type { CitizenRecord, FamilyMember } from '@/types/citizen';
 import { removeVietnameseTones } from '@/lib/utils/removeVietnameseTones';
 import { removeTableLines } from '@/lib/utils/imageProcessor';
@@ -17,7 +17,7 @@ async function getDigitWorker() {
       const worker = await createWorker('eng', 1, { logger: () => {} });
       await worker.setParameters({
         tessedit_char_whitelist: '0123456789',
-        tessedit_pageseg_mode: '7',
+        tessedit_pageseg_mode: PSM.SINGLE_LINE,
       });
       return worker;
     })();

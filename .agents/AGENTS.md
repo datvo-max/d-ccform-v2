@@ -32,8 +32,13 @@
 - Do sử dụng Tesseract OCR và đọc mã vạch trực tiếp tại Browser, nên phải lưu ý các thao tác không được chiếm Main Thread quá lâu, dùng async/await hợp lý.
 - Luôn hiển thị thông báo tiến độ (progress bar hoặc Toaster).
 
+
+
 ## 5. Quản lý Phiên bản (Versioning) & Git
 - Mỗi khi đẩy code (push) lên GitHub, phải chủ động thay đổi phiên bản trong file `package.json` theo mức độ thay đổi của code:
   - Thay đổi lớn (Major): Cập nhật số đầu (VD: 1.0.0 -> 2.0.0).
   - Thay đổi tính năng mới (Minor): Cập nhật số ở giữa (VD: 1.0.0 -> 1.1.0).
   - Thay đổi nhỏ hoặc fix bugs (Patch): Cập nhật số cuối cùng (VD: 1.0.0 -> 1.0.1).
+
+## 6. Trước khi đưa code lên github
+- Không được push code lên github khi chưa chạy lệnh npm run lint và npm run build để kiểm tra, khi không còn lỗi thì mới push lên github.

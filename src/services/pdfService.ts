@@ -40,7 +40,7 @@ export async function pdfPageToBlob(
   );
 
   page.cleanup();
-  await pdf.destroy();
+  await (pdf as any).destroy();
 
   return { blob, dataUrl, width: viewport.width, height: viewport.height };
 }
@@ -51,7 +51,7 @@ export async function getPdfPageCount(file: File): Promise<number> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
   const numPages = pdf.numPages;
-  await pdf.destroy();
+  await (pdf as any).destroy();
   return numPages;
 }
 
@@ -86,7 +86,7 @@ export async function pdfToBlobs(
     results.push({ blob, dataUrl, width: viewport.width, height: viewport.height, pageNumber: i });
   }
   
-  await pdf.destroy();
+  await (pdf as any).destroy();
   return results;
 }
 
