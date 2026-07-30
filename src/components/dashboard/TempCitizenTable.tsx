@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { TempCitizenRecord } from '@/types/citizen';
 import { toast } from 'sonner';
+import { useConfirm } from '@/hooks/useConfirm';
 
 interface TempCitizenTableProps {
   data: TempCitizenRecord[];
@@ -18,6 +19,7 @@ export function TempCitizenTable({ data, onRowClick, onBatchProcess, onBatchDele
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const { confirm, ConfirmComponent } = useConfirm();
 
   const totalPages = Math.ceil(data.length / pageSize) || 1;
   const currentData = useMemo(() => {
@@ -55,14 +57,21 @@ export function TempCitizenTable({ data, onRowClick, onBatchProcess, onBatchDele
 
   const handleDeleteSelected = () => {
     if (selectedIds.size === 0) return;
-    if (window.confirm(`Bạn có chắc chắn muốn xoá ${selectedIds.size} thẻ này khỏi bảng tạm?`)) {
-      onBatchDelete(Array.from(selectedIds));
-      setSelectedIds(new Set());
-    }
+    confirm(
+      'Xóa bảng tạm',
+      `Bạn có chắc chắn muốn xoá ${selectedIds.size} thẻ này khỏi bảng tạm?`,
+      () => {
+        onBatchDelete(Array.from(selectedIds));
+        setSelectedIds(new Set());
+      },
+      { isDestructive: true, confirmText: 'Xóa' }
+    );
   };
 
   return (
-    <div className="flex flex-col h-[500px] border rounded-md bg-white shadow-sm overflow-hidden">
+    <>
+      <ConfirmComponent />
+      <div className="flex flex-col h-[500px] border rounded-md bg-white shadow-sm overflow-hidden">
       <div className="p-3 border-b bg-gray-50 flex items-center justify-between">
         <h3 className="font-semibold text-sm">Bảng tạm ({data.length})</h3>
         <div className="flex gap-2">
@@ -195,5 +204,6 @@ export function TempCitizenTable({ data, onRowClick, onBatchProcess, onBatchDele
         </div>
       )}
     </div>
+    </>
   );
 }

@@ -15,6 +15,7 @@ import { db } from "@/lib/db";
 import { Trash2, Download, Upload, Eye, EyeOff } from "lucide-react";
 import packageJson from "../../../package.json";
 import { exportDatabase, importDatabase } from "@/lib/backupService";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [progress, setProgress] = useState<{ percent: number; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { confirm, ConfirmComponent } = useConfirm();
 
   // Modal mật khẩu state
   const [passwordPrompt, setPasswordPrompt] = useState<{
@@ -37,16 +39,21 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleClearDatabase = async () => {
-    if (confirm('Bạn có chắc chắn muốn XÓA TOÀN BỘ dữ liệu trong hệ thống? Hành động này không thể hoàn tác!')) {
-      try {
-        await db.citizens.clear();
-        await db.tempCitizens.clear();
-        toast.success('Đã xóa toàn bộ cơ sở dữ liệu IndexedDB!');
-        onClose();
-      } catch (err) {
-        toast.error('Lỗi khi xóa cơ sở dữ liệu');
-      }
-    }
+    confirm(
+      'Xóa dữ liệu',
+      'Bạn có chắc chắn muốn XÓA TOÀN BỘ dữ liệu trong hệ thống? Hành động này không thể hoàn tác!',
+      async () => {
+        try {
+          await db.citizens.clear();
+          await db.tempCitizens.clear();
+          toast.success('Đã xóa toàn bộ cơ sở dữ liệu IndexedDB!');
+          onClose();
+        } catch (err) {
+          toast.error('Lỗi khi xóa cơ sở dữ liệu');
+        }
+      },
+      { isDestructive: true, confirmText: 'Xóa toàn bộ' }
+    );
   };
 
   const executeBackup = async (pass: string) => {
@@ -80,31 +87,40 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   };
 
   const executeRestore = async (file: File, pass: string) => {
-    if (confirm('Khôi phục sẽ XÓA TOÀN BỘ dữ liệu hiện tại và thay thế bằng dữ liệu từ file backup. Bạn có chắc chắn muốn tiếp tục?')) {
-      setIsImporting(true);
-      setProgress({ percent: 0, message: 'Đang chuẩn bị...' });
-      setPasswordPrompt({ isOpen: false, type: 'restore' });
-      const toastId = toast.loading('Đang khôi phục dữ liệu...');
-      try {
-        await importDatabase(file, pass, (percent, message) => {
-          setProgress({ percent, message });
-          toast.loading(message, { id: toastId });
-        });
-        toast.success('Khôi phục thành công! Trang web sẽ được tải lại.', { id: toastId });
-        setTimeout(() => window.location.reload(), 1500);
-      } catch (err: any) {
-        toast.error(err.message || 'Lỗi khôi phục', { id: toastId });
-      } finally {
-        setIsImporting(false);
-        setProgress(null);
-        setPassword('');
-        if (fileInputRef.current) fileInputRef.current.value = '';
+    confirm(
+      'Khôi phục dữ liệu',
+      'Khôi phục sẽ XÓA TOÀN BỘ dữ liệu hiện tại và thay thế bằng dữ liệu từ file backup. Bạn có chắc chắn muốn tiếp tục?',
+      async () => {
+        setIsImporting(true);
+        setProgress({ percent: 0, message: 'Đang chuẩn bị...' });
+        setPasswordPrompt({ isOpen: false, type: 'restore' });
+        const toastId = toast.loading('Đang khôi phục dữ liệu...');
+        try {
+          await importDatabase(file, pass, (percent, message) => {
+            setProgress({ percent, message });
+            toast.loading(message, { id: toastId });
+          });
+          toast.success('Khôi phục thành công! Trang web sẽ được tải lại.', { id: toastId });
+          setTimeout(() => window.location.reload(), 1500);
+        } catch (err: any) {
+          toast.error(err.message || 'Lỗi khôi phục', { id: toastId });
+        } finally {
+          setIsImporting(false);
+          setProgress(null);
+          setPassword('');
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+      },
+      {
+        isDestructive: true,
+        confirmText: 'Khôi phục',
+        onCancel: () => {
+          setPasswordPrompt({ isOpen: false, type: 'restore' });
+          setPassword('');
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
       }
-    } else {
-      setPasswordPrompt({ isOpen: false, type: 'restore' });
-      setPassword('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+    );
   };
 
   const handleBackupClick = () => {
@@ -149,6 +165,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
 
   return (
     <>
+      <ConfirmComponent />
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>

@@ -73,9 +73,9 @@ const createDummyRecordFromTemp = (tempRec: TempCitizenRecord): CitizenRecord =>
 
 // Lấy thông báo toast ra
 export default function DashboardPage() {
-  const records = useLiveQuery(() => db.citizens.toArray(), []) || [];
-  const tempRecords = useLiveQuery(() => db.tempCitizens.toArray(), []) || [];
-  const pendingConflicts = useLiveQuery(() => db.conflicts.toArray(), []) || [];
+  const records = useLiveQuery(() => db.transaction('r', db.citizens, () => db.citizens.toArray()), []) || [];
+  const tempRecords = useLiveQuery(() => db.transaction('r', db.tempCitizens, () => db.tempCitizens.toArray()), []) || [];
+  const pendingConflicts = useLiveQuery(() => db.transaction('r', db.conflicts, () => db.conflicts.toArray()), []) || [];
   
   // States for dialogs
   const [selectedRecord, setSelectedRecord] = useState<CitizenRecord | null>(null);
