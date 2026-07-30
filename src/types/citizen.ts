@@ -98,3 +98,11 @@ export interface AppSettings {
   ocrMode: 'tesseract_offline' | 'ai_vision' | 'cloud_vision_ocr';
   // Các field khác cho tương lai nếu dùng API
 }
+
+export interface PendingConflict {
+  id: string;
+  existingRecord: CitizenRecord;
+  parsedData: Partial<CitizenRecord>;
+  newFileAttr: AttachedFile;
+  createdAt?: string;
+}

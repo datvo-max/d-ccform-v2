@@ -1,12 +1,12 @@
 {
   "name": "d-ccform-v2",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.11",
@@ -24,6 +24,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dexie": "^4.4.4",
+    "dexie-export-import": "^4.4.0",
     "dexie-react-hooks": "^4.4.0",
     "lucide-react": "^1.27.0",
     "next": "16.2.12",

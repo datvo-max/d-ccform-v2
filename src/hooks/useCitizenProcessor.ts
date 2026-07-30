@@ -3,17 +3,10 @@ import { db } from '@/lib/db';
 import { performOfflineOcr } from '@/services/ocrService';
 import { readBarcode } from '@/services/barcodeService';
 import { pdfToBlobs, createThumbnail, loadPdfDocument, extractPdfPageToBlob } from '@/services/pdfService';
-import { CitizenRecord, AttachedFile } from '@/types/citizen';
+import { CitizenRecord, AttachedFile, PendingConflict } from '@/types/citizen';
 import { toast } from 'sonner';
 
 export type ConflictResolution = 'merge' | 'add_file_only' | 'skip' | 'create_new';
-
-export interface PendingConflict {
-  id: string;
-  existingRecord: CitizenRecord;
-  parsedData: Partial<CitizenRecord>;
-  newFileAttr: AttachedFile;
-}
 
 export type FileProcessStatus = 'waiting' | 'processing' | 'completed' | 'error' | 'cancelled';
 
@@ -28,7 +21,6 @@ export interface FileQueueItem {
 }
 
 export function useCitizenProcessor() {
-  const [pendingConflicts, setPendingConflicts] = useState<PendingConflict[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState<string>('');
@@ -67,7 +59,9 @@ export function useCitizenProcessor() {
         const handleBlob = async (blob: Blob, pageInfo: string) => {
           if (cancelRef.current) return;
 
-          setCurrentStep(`Tạo Thumbnail: ${file.name}${pageInfo}`);
+          if (!isManualExtract) {
+            setCurrentStep(`Tạo Thumbnail: ${file.name}${pageInfo}`);
+          }
           const thumbnail = await createThumbnail(new File([blob], file.name, { type: blob.type }));
 
           if (isManualExtract) {
@@ -118,12 +112,13 @@ export function useCitizenProcessor() {
             const existingRecord = await db.findByIdNumber(parsedData.idNumber);
 
             if (existingRecord) {
-              setPendingConflicts(prev => [...prev, {
+              await db.conflicts.add({
                 id: Date.now().toString() + '_' + Math.random().toString(36).substring(7),
                 existingRecord,
                 parsedData,
                 newFileAttr,
-              }]);
+                createdAt: new Date().toISOString()
+              });
             } else {
               const newRecord: CitizenRecord = {
                 ...(parsedData as any),
@@ -159,7 +154,11 @@ export function useCitizenProcessor() {
             if (cancelRef.current) break;
 
             const pageInfo = pageCount > 1 ? ` (Trang ${p}/${pageCount})` : '';
-            setCurrentStep(`Trích xuất trang PDF: ${file.name}${pageInfo}`);
+            if (isManualExtract) {
+              setCurrentStep(`Đang tách và lưu trang PDF: ${file.name}${pageInfo}`);
+            } else {
+              setCurrentStep(`Trích xuất trang PDF: ${file.name}${pageInfo}`);
+            }
 
             const { blob } = await extractPdfPageToBlob(pdfDoc, p, 2.0);
             
@@ -174,6 +173,9 @@ export function useCitizenProcessor() {
           }
           await pdfDoc.cleanup();
         } else {
+          if (isManualExtract) {
+            setCurrentStep(`Đang lưu ảnh: ${file.name}`);
+          }
           await handleBlob(file, '');
         }
 
@@ -240,8 +242,7 @@ export function useCitizenProcessor() {
     await executeQueue(updatedQueue);
   };
 
-  const resolveConflict = async (conflictId: string, resolution: ConflictResolution) => {
-    const conflict = pendingConflicts.find(c => c.id === conflictId);
+  const resolveConflict = async (conflict: PendingConflict, resolution: ConflictResolution) => {
     if (!conflict) return;
 
     if (resolution !== 'skip') {
@@ -290,7 +291,7 @@ export function useCitizenProcessor() {
         toast.success(`Đã lưu hồ sơ mới: ${conflict.parsedData.idNumber}`);
       }
     }
-    setPendingConflicts(prev => prev.filter(c => c.id !== conflictId));
+    await db.conflicts.delete(conflict.id);
   };
 
   const reprocessRecords = async (ids: number[]) => {
@@ -460,12 +461,13 @@ export function useCitizenProcessor() {
             const existingRecord = await db.findByIdNumber(parsedData.idNumber);
 
             if (existingRecord) {
-              setPendingConflicts(prev => [...prev, {
+              await db.conflicts.add({
                 id: Date.now().toString() + '_' + Math.random().toString(36).substring(7),
                 existingRecord,
                 parsedData,
                 newFileAttr,
-              }]);
+                createdAt: new Date().toISOString()
+              });
             } else {
               const newRecord: CitizenRecord = {
                 ...(parsedData as any),
@@ -524,5 +526,5 @@ export function useCitizenProcessor() {
     setIsProcessing(false);
   };
 
-  return { processFiles, processTempBatchOcr, resumeProcessing, reprocessRecords, resolveConflict, pendingConflicts, isProcessing, progress, currentStep, fileQueue, cancelProcessing, finishProcessing };
+  return { processFiles, processTempBatchOcr, resumeProcessing, reprocessRecords, resolveConflict, isProcessing, progress, currentStep, fileQueue, cancelProcessing, finishProcessing };
 }

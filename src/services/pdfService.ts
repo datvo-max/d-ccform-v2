@@ -34,13 +34,12 @@ export async function pdfPageToBlob(
   const ctx = canvas.getContext('2d')!;
   await page.render({ canvasContext: ctx, viewport, canvas }).promise;
 
-  const dataUrl = canvas.toDataURL('image/png');
+  const dataUrl = ""; // Đã bỏ toDataURL để tiết kiệm RAM
   const blob = await new Promise<Blob>((resolve) =>
-    canvas.toBlob((b) => resolve(b!), 'image/png')
+    canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
   );
 
   page.cleanup();
-  await (pdf as any).destroy();
 
   return { blob, dataUrl, width: viewport.width, height: viewport.height };
 }
@@ -51,7 +50,6 @@ export async function getPdfPageCount(file: File): Promise<number> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
   const numPages = pdf.numPages;
-  await (pdf as any).destroy();
   return numPages;
 }
 
@@ -77,16 +75,15 @@ export async function pdfToBlobs(
     const ctx = canvas.getContext('2d')!;
     await page.render({ canvasContext: ctx, viewport, canvas }).promise;
 
-    const dataUrl = canvas.toDataURL('image/png');
+    const dataUrl = "";
     const blob = await new Promise<Blob>((resolve) =>
-      canvas.toBlob((b) => resolve(b!), 'image/png')
+      canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
     );
 
     page.cleanup();
     results.push({ blob, dataUrl, width: viewport.width, height: viewport.height, pageNumber: i });
   }
   
-  await (pdf as any).destroy();
   return results;
 }
 
@@ -113,9 +110,9 @@ export async function extractPdfPageToBlob(
   const ctx = canvas.getContext('2d')!;
   await page.render({ canvasContext: ctx, viewport, canvas }).promise;
 
-  const dataUrl = canvas.toDataURL('image/png');
+  const dataUrl = "";
   const blob = await new Promise<Blob>((resolve) =>
-    canvas.toBlob((b) => resolve(b!), 'image/png')
+    canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
   );
 
   // Giải phóng bộ nhớ khổng lồ của Canvas và Page

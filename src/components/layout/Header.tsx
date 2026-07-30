@@ -1,5 +1,6 @@
 import { Settings, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import packageJson from '../../../package.json';
 
 interface HeaderProps {
   onSettingsClick?: () => void;
@@ -14,7 +15,12 @@ export function Header({ onSettingsClick }: HeaderProps) {
             <FileText size={24} />
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-tight">D-CCForm V2</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="font-bold text-lg leading-tight">D-CCForm V2</h1>
+              <span className="text-[10px] font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
+                v{packageJson.version}
+              </span>
+            </div>
             <p className="text-xs text-muted-foreground">Quản lý Phiếu thu nhận căn cước</p>
           </div>
         </div>

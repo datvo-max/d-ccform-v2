@@ -13,17 +13,69 @@ import { CompareDialog } from "@/components/review/CompareDialog";
 import { ExportConfigDialog } from "@/components/export/ExportConfigDialog";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { TempCitizenTable } from "@/components/dashboard/TempCitizenTable";
-import type { CitizenRecord, TempCitizenRecord } from "@/types/citizen";
+import type { CitizenRecord, TempCitizenRecord, PendingConflict } from "@/types/citizen";
 import { useCitizenProcessor, ConflictResolution } from "@/hooks/useCitizenProcessor";
 import { exportToExcel } from "@/services/exportService";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+const createDummyRecordFromTemp = (tempRec: TempCitizenRecord): CitizenRecord => ({
+  receiptNumber: '',
+  residenceFileNumber: '',
+  barcode: '',
+  fullName: '',
+  fullNameNormalized: '',
+  nickname: '',
+  birthDate: '',
+  gender: '',
+  idNumber: '',
+  idNumber9: '',
+  ethnicity: '',
+  religion: '',
+  nationality: '',
+  birthPlace: '',
+  birthRegistration: '',
+  hometown: '',
+  permanentAddress: '',
+  temporaryAddress: '',
+  currentAddress: '',
+  occupation: '',
+  bloodType: '',
+  phoneNumber: '',
+  email: '',
+  familyMembers: [],
+  distinguishingMarks: '',
+  issueType: '',
+  issuingUnit: 'CA phường Tân An, TP Cần Thơ',
+  requestDigitalCard: false,
+  requestIntegrateOnCard: false,
+  requestIntegrateDigital: false,
+  requestVerifyOldId: false,
+  requestVerifyRevokedId: false,
+  requestDNACollection: false,
+  requestVoiceCollection: false,
+  attachedFiles: [{
+    id: tempRec.id!.toString(),
+    fileName: tempRec.fileName,
+    fileType: tempRec.fileType,
+    pageNumber: tempRec.pageNumber,
+    imageBlob: tempRec.imageBlob,
+    rawOcrText: '',
+    createdAt: new Date().toISOString()
+  }],
+  status: 'pending',
+  extractionConfidence: 100,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  note: ''
+});
 
 // Lấy thông báo toast ra
 export default function DashboardPage() {
   const records = useLiveQuery(() => db.citizens.toArray(), []) || [];
   const tempRecords = useLiveQuery(() => db.tempCitizens.toArray(), []) || [];
+  const pendingConflicts = useLiveQuery(() => db.conflicts.toArray(), []) || [];
   
   // States for dialogs
   const [selectedRecord, setSelectedRecord] = useState<CitizenRecord | null>(null);
@@ -42,7 +94,6 @@ export default function DashboardPage() {
     resumeProcessing, 
     reprocessRecords, 
     resolveConflict, 
-    pendingConflicts, 
     isProcessing, 
     progress, 
     currentStep, 
@@ -53,6 +104,18 @@ export default function DashboardPage() {
   
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(null);
   const activeConflict = pendingConflicts.find(c => c.id === selectedConflictId);
+  
+  // States for duplicate list pagination
+  const [conflictPageSize, setConflictPageSize] = useState(5);
+  const [conflictPage, setConflictPage] = useState(1);
+  const totalConflicts = pendingConflicts.length;
+  const conflictTotalPages = Math.ceil(totalConflicts / conflictPageSize) || 1;
+  
+  if (conflictPage > conflictTotalPages && conflictTotalPages > 0) {
+    setConflictPage(conflictTotalPages);
+  }
+  
+  const currentConflicts = pendingConflicts.slice((conflictPage - 1) * conflictPageSize, conflictPage * conflictPageSize);
   
   const total = records.length;
   const verified = records.filter(r => r.status === 'verified').length;
@@ -76,25 +139,23 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSaveReview = async (updatedRecord: CitizenRecord) => {
+  const saveRecordToDb = async (updatedRecord: CitizenRecord): Promise<boolean> => {
     // Kiểm tra trùng lặp trước khi lưu
     if (updatedRecord.idNumber) {
       try {
         const existing = await db.findByIdNumber(updatedRecord.idNumber);
-        // Nếu tồn tại một hồ sơ khác có cùng số định danh
         if (existing && existing.id !== updatedRecord.id) {
           setManualConflict({
             existingRecord: existing,
             newRecord: updatedRecord
           });
-          return; // Dừng luồng lưu thông thường, chuyển sang CompareDialog
+          return false;
         }
       } catch (err) {
         console.error('Lỗi khi kiểm tra trùng lặp lúc lưu', err);
       }
     }
 
-    // Cập nhật record, set status thành verified
     try {
       const dataToSave = { ...updatedRecord };
       if (dataToSave.fullName) {
@@ -102,15 +163,13 @@ export default function DashboardPage() {
       }
       
       if (selectedTempRecord) {
-        // Xoá record tạm nếu nó xuất phát từ bảng tạm
-        const { id, ...newCitizenData } = dataToSave; // bỏ qua id ảo nếu có
+        const { id, ...newCitizenData } = dataToSave;
         await db.citizens.add({
           ...newCitizenData,
           status: 'verified',
           updatedAt: new Date().toISOString()
         } as CitizenRecord);
         await db.tempCitizens.delete(selectedTempRecord.id!);
-        setSelectedTempRecord(null);
       } else {
         await db.citizens.update(updatedRecord.id!, {
           ...dataToSave,
@@ -119,10 +178,56 @@ export default function DashboardPage() {
         });
       }
       toast.success('Đã lưu và duyệt hồ sơ');
-      setIsReviewOpen(false);
+      return true;
     } catch (err) {
       toast.error('Lỗi khi lưu hồ sơ');
+      return false;
     }
+  };
+
+  const handleSaveReview = async (updatedRecord: CitizenRecord) => {
+    const success = await saveRecordToDb(updatedRecord);
+    if (success) {
+      setSelectedTempRecord(null);
+      setIsReviewOpen(false);
+    }
+  };
+
+  const handleSaveAndNextReview = async (updatedRecord: CitizenRecord) => {
+    const success = await saveRecordToDb(updatedRecord);
+    if (!success) return; 
+    
+    if (selectedTempRecord) {
+      const idx = tempRecords.findIndex(r => r.id === selectedTempRecord.id);
+      setSelectedTempRecord(null); 
+      
+      if (idx !== -1 && idx < tempRecords.length - 1) {
+        const nextTemp = tempRecords[idx + 1];
+        setSelectedTempRecord(nextTemp);
+        setSelectedRecord(createDummyRecordFromTemp(nextTemp));
+        return;
+      }
+    } else if (selectedRecord) {
+      const pendingRecords = records.filter(r => r.status === 'pending' || r.status === 'error');
+      const idx = pendingRecords.findIndex(r => r.id === selectedRecord.id);
+      
+      if (idx !== -1 && idx < pendingRecords.length - 1) {
+        setSelectedRecord(pendingRecords[idx + 1]);
+        return;
+      } else if (pendingRecords.length > 0 && pendingRecords[0].id !== selectedRecord.id) {
+        setSelectedRecord(pendingRecords[0]);
+        return;
+      } else {
+         const allIdx = records.findIndex(r => r.id === selectedRecord.id);
+         if (allIdx !== -1 && allIdx < records.length - 1) {
+            setSelectedRecord(records[allIdx + 1]);
+            return;
+         }
+      }
+    }
+    
+    setIsReviewOpen(false);
+    toast.info("Đã xử lý hết danh sách");
   };
 
   const handleDeleteRecord = async (id: number) => {
@@ -135,8 +240,19 @@ export default function DashboardPage() {
   };
 
   const handleBatchReOcr = async (ids: number[]) => {
+    const verifiedIds = records.filter(r => ids.includes(r.id!) && r.status === 'verified').map(r => r.id!);
+    const idsToProcess = ids.filter(id => !verifiedIds.includes(id));
+    
+    if (idsToProcess.length === 0) {
+      toast.error("Các hồ sơ đã duyệt không thể quét lại!");
+      return;
+    }
+    if (idsToProcess.length < ids.length) {
+      toast.info(`Đã bỏ qua ${ids.length - idsToProcess.length} hồ sơ đã duyệt.`);
+    }
+
     if (reprocessRecords) {
-      await reprocessRecords(ids);
+      await reprocessRecords(idsToProcess);
     }
   };
 
@@ -236,9 +352,9 @@ export default function DashboardPage() {
           errors={errors} 
         />
         
-        <div className="flex flex-col lg:flex-row gap-6 items-start">
-          {/* Cột trái: Upload, Bảng tạm, ProcessQueue */}
-          <div className="w-full lg:w-1/3 xl:w-1/4 shrink-0 flex flex-col gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          {/* Cột trái (Chức năng): Bằng kích thước 1 thẻ stat ở trên */}
+          <div className="xl:col-span-1 flex flex-col gap-6 min-w-0">
             <UploadSection 
               onProcessStart={handleProcessFiles} 
             />
@@ -260,57 +376,7 @@ export default function DashboardPage() {
                   data={tempRecords}
                   onRowClick={(tempRec) => {
                     setSelectedTempRecord(tempRec);
-                    // Khi bấm vào thẻ tạm, mở ReviewSheet với dữ liệu rỗng, gắn file đính kèm là ảnh của thẻ tạm
-                    const dummyRecord: CitizenRecord = {
-                      receiptNumber: '',
-                      residenceFileNumber: '',
-                      barcode: '',
-                      fullName: '',
-                      fullNameNormalized: '',
-                      nickname: '',
-                      birthDate: '',
-                      gender: '',
-                      idNumber: '',
-                      idNumber9: '',
-                      ethnicity: '',
-                      religion: '',
-                      nationality: '',
-                      birthPlace: '',
-                      birthRegistration: '',
-                      hometown: '',
-                      permanentAddress: '',
-                      temporaryAddress: '',
-                      currentAddress: '',
-                      occupation: '',
-                      bloodType: '',
-                      phoneNumber: '',
-                      email: '',
-                      familyMembers: [],
-                      distinguishingMarks: '',
-                      issueType: '',
-                      issuingUnit: 'CA phường Tân An, TP Cần Thơ',
-                      requestDigitalCard: false,
-                      requestIntegrateOnCard: false,
-                      requestIntegrateDigital: false,
-                      requestVerifyOldId: false,
-                      requestVerifyRevokedId: false,
-                      requestDNACollection: false,
-                      requestVoiceCollection: false,
-                      attachedFiles: [{
-                        id: tempRec.id!.toString(),
-                        fileName: tempRec.fileName,
-                        fileType: tempRec.fileType,
-                        pageNumber: tempRec.pageNumber,
-                        imageBlob: tempRec.imageBlob,
-                        rawOcrText: '',
-                        createdAt: new Date().toISOString()
-                      }],
-                      status: 'pending',
-                      extractionConfidence: 100,
-                      createdAt: new Date().toISOString(),
-                      updatedAt: new Date().toISOString(),
-                      note: ''
-                    };
+                    const dummyRecord = createDummyRecordFromTemp(tempRec);
                     setSelectedRecord(dummyRecord);
                     setIsReviewOpen(true);
                   }}
@@ -321,15 +387,15 @@ export default function DashboardPage() {
             )}
           </div>
           
-          {/* Cột phải: Bảng chính và Bảng chờ duyệt */}
-          <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
+          {/* Cột phải (Danh sách): Bằng kích thước 3 thẻ stat còn lại */}
+          <div className="xl:col-span-3 flex flex-col gap-6 min-w-0">
             {pendingConflicts.length > 0 && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 space-y-3">
                 <h3 className="font-semibold text-yellow-800">
                   Hồ sơ trùng lặp chờ xử lý ({pendingConflicts.length})
                 </h3>
                 <div className="bg-white rounded-md border shadow-sm divide-y">
-                  {pendingConflicts.map(conflict => (
+                  {currentConflicts.map(conflict => (
                     <div key={conflict.id} className="flex flex-wrap gap-4 items-center justify-between p-3 hover:bg-gray-50">
                       <div>
                         <p className="font-medium text-sm text-gray-900">{conflict.parsedData.fullName || 'Chưa rõ tên'}</p>
@@ -337,12 +403,63 @@ export default function DashboardPage() {
                           ID: <span className="font-mono text-gray-700">{conflict.parsedData.idNumber}</span> • File: {conflict.newFileAttr.fileName}
                         </p>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => setSelectedConflictId(conflict.id)}>
-                        Xem & Giải quyết
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => resolveConflict(conflict, 'add_file_only')}>
+                          Thêm File
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => resolveConflict(conflict, 'create_new')} className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700">
+                          Tạo mới
+                        </Button>
+                        {/* Giữ lại một nút nhỏ để xem chi tiết nếu cần gộp dữ liệu text */}
+                        <Button variant="ghost" size="sm" onClick={() => setSelectedConflictId(conflict.id)} className="text-gray-500 hover:text-gray-700">
+                          Chi tiết
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
+                
+                {/* Pagination cho bảng trùng lặp */}
+                {totalConflicts > 5 && (
+                  <div className="flex items-center justify-between mt-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground text-xs">Hiển thị:</span>
+                      <select 
+                        value={conflictPageSize} 
+                        onChange={(e) => {
+                          setConflictPageSize(Number(e.target.value));
+                          setConflictPage(1);
+                        }}
+                        className="text-xs border border-yellow-200 rounded p-1 bg-white outline-none focus:ring-1 focus:ring-yellow-400"
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={20}>20</option>
+                        <option value={50}>50</option>
+                      </select>
+                    </div>
+                    
+                    {totalConflicts > conflictPageSize && (
+                      <div className="flex items-center gap-1">
+                        <Button variant="outline" size="icon" className="w-6 h-6 border-yellow-200 text-yellow-700 hover:bg-yellow-100" onClick={() => setConflictPage(1)} disabled={conflictPage === 1}>
+                          <ChevronsLeft className="w-3 h-3" />
+                        </Button>
+                        <Button variant="outline" size="icon" className="w-6 h-6 border-yellow-200 text-yellow-700 hover:bg-yellow-100" onClick={() => setConflictPage(p => Math.max(1, p - 1))} disabled={conflictPage === 1}>
+                          <ChevronLeft className="w-3 h-3" />
+                        </Button>
+                        <span className="text-xs mx-1 text-yellow-800 font-medium">
+                          {conflictPage} / {conflictTotalPages}
+                        </span>
+                        <Button variant="outline" size="icon" className="w-6 h-6 border-yellow-200 text-yellow-700 hover:bg-yellow-100" onClick={() => setConflictPage(p => Math.min(conflictTotalPages, p + 1))} disabled={conflictPage === conflictTotalPages}>
+                          <ChevronRight className="w-3 h-3" />
+                        </Button>
+                        <Button variant="outline" size="icon" className="w-6 h-6 border-yellow-200 text-yellow-700 hover:bg-yellow-100" onClick={() => setConflictPage(conflictTotalPages)} disabled={conflictPage === conflictTotalPages}>
+                          <ChevronsRight className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             
@@ -367,6 +484,7 @@ export default function DashboardPage() {
         onOpenChange={setIsReviewOpen}
         record={selectedRecord}
         onSave={handleSaveReview}
+        onSaveAndNext={handleSaveAndNextReview}
         onCheckDuplicate={handleCheckDuplicate}
       />
 
@@ -386,7 +504,7 @@ export default function DashboardPage() {
         newRecord={activeConflict?.parsedData || manualConflict?.newRecord || null}
         onMerge={() => {
           if (activeConflict) {
-            resolveConflict(activeConflict.id, 'merge');
+            resolveConflict(activeConflict, 'merge');
             setSelectedConflictId(null);
           } else if (manualConflict) {
             handleResolveManualConflict('merge');
@@ -394,7 +512,7 @@ export default function DashboardPage() {
         }}
         onAddFileOnly={() => {
           if (activeConflict) {
-            resolveConflict(activeConflict.id, 'add_file_only');
+            resolveConflict(activeConflict, 'add_file_only');
             setSelectedConflictId(null);
           } else if (manualConflict) {
             handleResolveManualConflict('add_file_only');
@@ -402,7 +520,7 @@ export default function DashboardPage() {
         }}
         onSkip={() => {
           if (activeConflict) {
-            resolveConflict(activeConflict.id, 'skip');
+            resolveConflict(activeConflict, 'skip');
             setSelectedConflictId(null);
           } else if (manualConflict) {
             setManualConflict(null);
@@ -410,7 +528,7 @@ export default function DashboardPage() {
         }}
         onCreateNew={() => {
           if (activeConflict) {
-            resolveConflict(activeConflict.id, 'create_new');
+            resolveConflict(activeConflict, 'create_new');
             setSelectedConflictId(null);
           } else if (manualConflict) {
             // Không cho tạo mới ở manual vì nếu tạo mới thì chỉ cần đổi ID là xong

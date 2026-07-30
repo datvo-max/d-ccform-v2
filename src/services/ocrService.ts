@@ -30,10 +30,13 @@ async function getOcrScheduler(): Promise<Scheduler> {
   if (!schedulerPromise) {
     schedulerPromise = (async () => {
       const scheduler = createScheduler();
-      // Sử dụng tối đa 4 workers hoặc bằng số luồng CPU hiện có (tùy điều kiện nào nhỏ hơn)
-      const numWorkers = typeof navigator !== 'undefined' && navigator.hardwareConcurrency 
-        ? Math.max(1, Math.min(navigator.hardwareConcurrency, 4))
+      // Tự động điều chỉnh số lượng worker theo số luồng CPU của thiết bị (ví dụ 8, 12, 16 luồng)
+      // Giữ lại 1 luồng cho giao diện (Main Thread) để tránh giật lag nếu máy có nhiều hơn 2 luồng.
+      const hwCores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency 
+        ? navigator.hardwareConcurrency 
         : 4;
+      // Giới hạn tối đa 80% CPU để tránh quá tải toàn bộ hệ thống (dành tài nguyên cho hệ điều hành và tác vụ khác)
+      const numWorkers = Math.max(1, Math.floor(hwCores * 0.8));
       
       const workerPromises = Array.from({ length: numWorkers }).map(async () => {
         const worker = await createWorker('vie+eng', 1, {
@@ -95,6 +98,7 @@ async function extractIdNumberWithCropping(
   imageWidth: number,
   imageHeight: number
 ): Promise<string | undefined> {
+  if (!ret?.data?.lines) return undefined;
   const normLines = ret.data.lines.map((l: any) => removeVietnameseTones(l.text).toLowerCase());
   const idLineIdx = normLines.findIndex((txt: string) => /dinh danh|so dinh danh|5\./.test(txt));
   

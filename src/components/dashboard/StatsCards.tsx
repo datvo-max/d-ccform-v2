@@ -17,7 +17,7 @@ export function StatsCards({ total, verified, pending, errors }: StatsCardsProps
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
       {stats.map((stat, i) => (
         <Card key={i}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

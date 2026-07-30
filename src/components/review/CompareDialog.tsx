@@ -93,16 +93,18 @@ export function CompareDialog({
         </div>
 
         <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:space-x-0">
-          <Button variant="outline" onClick={onSkip} className="sm:mr-auto">
-            Quay lại
+          <Button variant="outline" onClick={onSkip} className="sm:mr-auto text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20">
+            Bỏ qua & Xóa bản quét
           </Button>
 
           <Button variant="secondary" onClick={onAddFileOnly}>
             Chỉ thêm file
           </Button>
-          <Button onClick={onMerge}>
-            Thêm file và cập nhật các trường
-          </Button>
+          {existingRecord.status !== 'verified' && (
+            <Button onClick={onMerge}>
+              Thêm file và cập nhật các trường
+            </Button>
+          )}
           {!hideCreateNew && (
             <Button variant="outline" className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700" onClick={onCreateNew}>
               Tạo mới (không trùng)

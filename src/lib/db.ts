@@ -1,10 +1,11 @@
 import Dexie, { type Table } from 'dexie';
-import { CitizenRecord, AppSettings, TempCitizenRecord } from '@/types/citizen';
+import { CitizenRecord, AppSettings, TempCitizenRecord, PendingConflict } from '@/types/citizen';
 
 export class CitizenDatabase extends Dexie {
   citizens!: Table<CitizenRecord, number>;
   tempCitizens!: Table<TempCitizenRecord, number>;
   settings!: Table<AppSettings, number>;
+  conflicts!: Table<PendingConflict, string>;
 
   constructor() {
     super('DCCFormV2DB');
@@ -14,6 +15,10 @@ export class CitizenDatabase extends Dexie {
       citizens: '++id, &idNumber, fullNameNormalized, status, createdAt',
       tempCitizens: '++id, createdAt',
       settings: '++id'
+    });
+
+    this.version(3).stores({
+      conflicts: 'id, createdAt'
     });
   }
 
